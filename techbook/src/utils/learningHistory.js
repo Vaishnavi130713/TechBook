@@ -7,11 +7,21 @@ const emptyHistory = {
   activities: [],
 };
 
+function makeId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 function readHistory() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
 
-    if (!saved) return { ...emptyHistory };
+    if (!saved) {
+      return {
+        topics: [],
+        quizzes: [],
+        activities: [],
+      };
+    }
 
     const parsed = JSON.parse(saved);
 
@@ -33,15 +43,28 @@ function readHistory() {
 }
 
 function saveHistory(history) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
 
-  window.dispatchEvent(new Event("techbook:learning-updated"));
+    window.dispatchEvent(new Event("techbook:learning-updated"));
 
-  return history;
+    return history;
+  } catch (error) {
+    console.error("Could not save TechBook history:", error);
+    return null;
+  }
 }
 
-function makeId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+function normalizeText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeProgress(value) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) return 0;
+
+  return Math.min(100, Math.max(0, number));
 }
 
 export function getLearningHistory() {
@@ -58,43 +81,54 @@ export function recordTopic({
   if (!title?.trim()) return null;
 
   const history = readHistory();
-  const normalizedTitle = title.trim().toLowerCase();
+  const cleanTitle = title.trim();
+  const cleanSubject = subject?.trim() || "General";
+  const cleanFeature = feature?.trim() || "TechBook";
+  const normalizedTitle = normalizeText(cleanTitle);
+  const normalizedSubject = normalizeText(cleanSubject);
+  const now = new Date().toISOString();
+  const safeProgress = normalizeProgress(progress);
 
   let topic = history.topics.find(
     (item) =>
-      item.title?.trim().toLowerCase() === normalizedTitle &&
-      item.subject === subject
+      normalizeText(item.title) === normalizedTitle &&
+      normalizeText(item.subject) === normalizedSubject
   );
-
-  const now = new Date().toISOString();
 
   if (topic) {
     topic.lastStudied = now;
-    topic.feature = feature;
-    topic.progress = Math.max(
-      Number(topic.progress) || 0,
-      Math.min(100, Math.max(0, Number(progress) || 0))
+    topic.feature = cleanFeature;
+    topic.features = Array.from(
+      new Set([...(topic.features || []), cleanFeature])
     );
 
-    if (status === "completed" || topic.progress === 100) {
+    if (status === "completed" || safeProgress >= 100) {
       topic.status = "completed";
       topic.progress = 100;
-    } else if (status === "in-progress") {
+      topic.completedAt = topic.completedAt || now;
+    } else if (topic.status !== "completed") {
       topic.status = "in-progress";
+      topic.progress = Math.max(
+        normalizeProgress(topic.progress),
+        safeProgress
+      );
     }
   } else {
     topic = {
       id: makeId(),
-      title: title.trim(),
-      subject,
-      feature,
-      progress: Math.min(100, Math.max(0, Number(progress) || 0)),
+      title: cleanTitle,
+      subject: cleanSubject,
+      feature: cleanFeature,
+      features: [cleanFeature],
+      progress: status === "completed" ? 100 : safeProgress,
       status:
-        status === "completed" || Number(progress) >= 100
+        status === "completed" || safeProgress >= 100
           ? "completed"
           : "in-progress",
       date: now,
       lastStudied: now,
+      completedAt:
+        status === "completed" || safeProgress >= 100 ? now : null,
     };
 
     history.topics.unshift(topic);
@@ -104,7 +138,33 @@ export function recordTopic({
   return topic;
 }
 
-export function completeTopic({ title, subject = "General", feature }) {
+export function updateTopicProgress({
+  title,
+  subject = "General",
+  feature = "TechBook",
+  progress,
+  status,
+}) {
+  const safeProgress =
+    status === "completed" ? 100 : normalizeProgress(progress);
+
+  return recordTopic({
+    title,
+    subject,
+    feature,
+    progress: safeProgress,
+    status:
+      status === "completed" || safeProgress >= 100
+        ? "completed"
+        : "in-progress",
+  });
+}
+
+export function completeTopic({
+  title,
+  subject = "General",
+  feature = "TechBook",
+}) {
   return recordTopic({
     title,
     subject,
@@ -133,16 +193,20 @@ export function recordActivity({
     type,
     subject,
     feature,
-    minutes: Math.max(0, Number(minutes) || 0),
+    minutes: Math.max(
+      0,
+      Number.isFinite(Number(minutes)) ? Number(minutes) : 0
+    ),
     icon,
     details,
     date: new Date().toISOString(),
   };
 
   history.activities.unshift(activity);
-  saveHistory(history);
 
-  return activity;
+  const saved = saveHistory(history);
+
+  return saved ? activity : null;
 }
 
 export function recordQuiz({
@@ -154,59 +218,89 @@ export function recordQuiz({
   correctAnswers,
   feature = "ReMind",
 }) {
-  if (!Number.isFinite(Number(score))) return null;
+  const numericScore = Number(score);
+
+  if (
+    score === undefined ||
+    score === null ||
+    score === "" ||
+    !Number.isFinite(numericScore)
+  ) {
+    console.error("Quiz was not saved: a valid score is required.");
+    return null;
+  }
 
   const history = readHistory();
-  const numericScore = Math.min(100, Math.max(0, Number(score)));
+  const now = new Date().toISOString();
+  const cleanTopic = topic.trim();
+  const cleanSubject = subject?.trim() || "General";
 
   const quiz = {
     id: makeId(),
-    title: title || topic || "Quiz",
-    topic: topic || title || "Quiz",
-    subject,
-    score: numericScore,
+    title: title?.trim() || cleanTopic || "Quiz",
+    topic: cleanTopic || title?.trim() || "Quiz",
+    subject: cleanSubject,
+    score: Math.min(100, Math.max(0, numericScore)),
     totalQuestions:
+      totalQuestions !== undefined &&
+      totalQuestions !== null &&
+      totalQuestions !== "" &&
       Number.isFinite(Number(totalQuestions))
         ? Math.max(0, Number(totalQuestions))
         : null,
     correctAnswers:
+      correctAnswers !== undefined &&
+      correctAnswers !== null &&
+      correctAnswers !== "" &&
       Number.isFinite(Number(correctAnswers))
         ? Math.max(0, Number(correctAnswers))
         : null,
     feature,
-    date: new Date().toISOString(),
+    date: now,
   };
+
+  // Save the topic and quiz in the same history update.
+  if (cleanTopic) {
+    let existingTopic = history.topics.find(
+      (item) =>
+        normalizeText(item.title) === normalizeText(cleanTopic) &&
+        normalizeText(item.subject) === normalizeText(cleanSubject)
+    );
+
+    if (!existingTopic) {
+      existingTopic = {
+        id: makeId(),
+        title: cleanTopic,
+        subject: cleanSubject,
+        feature,
+        features: [feature],
+        progress: 0,
+        status: "in-progress",
+        date: now,
+        lastStudied: now,
+        completedAt: null,
+      };
+
+      history.topics.unshift(existingTopic);
+    } else {
+      existingTopic.lastStudied = now;
+      existingTopic.feature = feature;
+      existingTopic.features = Array.from(
+        new Set([...(existingTopic.features || []), feature])
+      );
+    }
+  }
 
   history.quizzes.unshift(quiz);
 
-  if (topic) {
-    recordTopic({
-      title: topic,
-      subject,
-      feature,
-    });
+  const saved = saveHistory(history);
 
-    // recordTopic saves its own changes, so reload before
-    // saving the updated quiz history.
-    const latestHistory = readHistory();
-    latestHistory.quizzes.unshift(quiz);
-
-    // Remove the earlier copy before saving.
-    latestHistory.quizzes = latestHistory.quizzes.filter(
-      (item, index, array) =>
-        array.findIndex((candidate) => candidate.id === item.id) === index
-    );
-
-    saveHistory(latestHistory);
-  } else {
-    saveHistory(history);
-  }
-
-  return quiz;
+  return saved ? quiz : null;
 }
 
 export function clearLearningHistory() {
-  saveHistory({
+  return saveHistory({
+    ...emptyHistory,
     topics: [],
     quizzes: [],
     activities: [],

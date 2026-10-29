@@ -157,6 +157,17 @@ export default function MyLearning() {
         .slice(0, 6),
     [data.activities]
   );
+  const recentlyStudiedTopics = useMemo(
+    () =>
+      [...data.topics]
+        .sort(
+          (a, b) =>
+            new Date(b.lastStudied || b.date || 0).getTime() -
+            new Date(a.lastStudied || a.date || 0).getTime()
+          )
+          .slice(0, 5),
+          [data.topics]
+  );
 
   const tabs = ["Overview", "Topics", "Quiz records", "Activity"];
 
@@ -258,7 +269,7 @@ export default function MyLearning() {
                 }}
               />
             ) : (
-              <TopicList topics={filteredTopics.slice(0, 5)} />
+              <TopicList topics={recentlyStudiedTopics} />
             )}
           </section>
 
