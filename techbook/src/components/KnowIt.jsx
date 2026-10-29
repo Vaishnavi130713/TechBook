@@ -1,5 +1,8 @@
-
 import { useEffect, useRef, useState } from "react";
+import {
+  recordTopic,
+  recordActivity,
+} from "../utils/learningHistory";
 
 const initialMessage = {
   role: "assistant",
@@ -209,6 +212,27 @@ export default function KnowIt() {
     setInput("");
     setSpeechError("");
     setIsTyping(true);
+
+    // Record the Know It learning activity.
+    recordTopic({
+      title: "Concept explanation practice",
+      subject: "General",
+      feature: "Know It",
+      progress: 0,
+      status: "in-progress",
+    });
+
+     recordActivity({
+      title: "Practised explaining a concept",
+      type: "Explanation submitted",
+      subject: "General",
+      feature: "Know It",
+      minutes: 0,
+      icon: "🧠",
+      details: `Submitted an explanation containing ${
+        text.split(/\s+/).filter(Boolean).length
+      } words.`,
+    });
 
     // Local prototype evaluation. AWS Bedrock will replace this
     // heuristic with context-aware evaluation and adaptive follow-ups.

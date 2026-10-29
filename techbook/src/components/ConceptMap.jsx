@@ -1,5 +1,8 @@
-
 import { useState } from "react";
+import {
+  recordTopic,
+  recordActivity,
+} from "../utils/learningHistory";
 
 /* ==========================================
    TECHBOOK — CONCEPT MAP
@@ -581,6 +584,26 @@ export default function ConceptMap() {
     setMap(nextMap);
     setSelectedNode("root");
     setError("");
+    
+    // Add the explored topic to My Learning.
+    recordTopic({
+      title: value,
+      subject: "General",
+      feature: "Concept Map",
+      progress: 0,
+      status: "in-progress",
+    });
+
+     // Record the successful concept-map exploration.
+     recordActivity({
+      title: `Explored concept map: ${value}`,
+      type: "Concept Map Explored",
+      subject: "General",
+      feature: "Concept Map",
+      minutes: 0,
+      icon: "🗺️",
+      details: "Generated a concept map and explored its connections.",
+    });
   }
 
   function selectNode(nodeId) {

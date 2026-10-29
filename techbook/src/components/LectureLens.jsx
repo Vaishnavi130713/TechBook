@@ -1,5 +1,9 @@
 
 import { useState } from "react";
+import {
+  recordTopic,
+  recordActivity,
+} from "../utils/learningHistory";
 
 const outputOptions = [
   {
@@ -66,7 +70,10 @@ function LectureLens() {
 
     try {
       const url = new URL(trimmedUrl);
-      const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+      const hostname = url.hostname
+        .toLowerCase()
+        .replace(/^www\./, "");
+
       let videoId = "";
 
       if (hostname === "youtu.be") {
@@ -93,6 +100,34 @@ function LectureLens() {
         );
         return;
       }
+
+      const selectedOption = outputOptions.find(
+        (option) => option.id === selectedOutput
+      );
+
+      const lectureTitle = `YouTube Lecture (${videoId})`;
+
+      recordTopic({
+        title: lectureTitle,
+        subject: "General",
+        feature: "LectureLens",
+        progress: 0,
+        status: "in-progress",
+      });
+
+      recordActivity({
+        title: `${
+          selectedOption?.title || "Lecture Workspace"
+        } — ${lectureTitle}`,
+        type: "Lecture workspace prepared",
+        subject: "General",
+        feature: "LectureLens",
+        minutes: 0,
+        icon: "▶",
+        details: `Selected output: ${
+          selectedOption?.title || "Smart Lecture Summary"
+        }`,
+      });
 
       setLecture({
         videoId,
