@@ -11,6 +11,7 @@ import ReMind from "./components/ReMind";
 import ConceptMap from "./components/ConceptMap";
 import KnowIt from "./components/KnowIt";
 import MyLearning from "./components/MyLearning";
+import StudyPlanner from "./components/StudyPlanner";
 
 const features = [
   {
@@ -76,6 +77,7 @@ function App() {
     if (hash === "#concept-map") return "concept-map";
     if (hash === "#know-it") return "know-it";
     if (hash === "#my-learning") return "my-learning";
+    if (hash === "#study-planner") return "study-planner";
 
     return "dashboard";
   };
@@ -124,6 +126,10 @@ function App() {
 
   if (currentPage === "my-learning") {
     return <MyLearning />;
+  }
+
+  if (currentPage === "study-planner") {
+  return <StudyPlanner />;
   }
 
   return (
