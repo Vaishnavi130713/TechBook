@@ -36,3 +36,63 @@ textarea,
 select {
   font: inherit;
 }
+
+
+.auth-screen,
+.auth-loading {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #f8f7fc;
+  color: #25233a;
+  text-align: center;
+}
+
+.auth-card {
+  width: min(100%, 440px);
+  padding: 40px 32px;
+  border: 1px solid #e9e5f3;
+  border-radius: 24px;
+  background: white;
+  box-shadow: 0 16px 50px rgba(44, 34, 78, 0.08);
+}
+
+.auth-brand-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 24px;
+  border-radius: 16px;
+  background: #7256c9;
+  color: white;
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.auth-card h1 {
+  margin: 12px 0;
+}
+
+.auth-card h1 span {
+  color: #7256c9;
+}
+
+.auth-card > p:not(.eyebrow) {
+  color: #777387;
+  line-height: 1.7;
+}
+
+.auth-card .primary-button {
+  display: inline-block;
+  margin: 20px 0;
+  border: 0;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.auth-card small {
+  display: block;
+  color: #888398;
+}

@@ -2,6 +2,7 @@
 import "./App.css";
 import "./index.css";
 import { useState, useEffect } from "react";
+import { useAuth } from "react-oidc-context";
 
 import NoteCraft from "./components/NoteCraft";
 import LectureLens from "./components/LectureLens";
@@ -66,6 +67,18 @@ const features = [
 ];
 
 function App() {
+  const auth = useAuth();
+
+  const handleSignIn = () => {
+    auth.signinRedirect();
+  };
+
+  const handleSignOut = async () => {
+    await auth.signoutRedirect({
+      post_logout_redirect_uri: window.location.origin + "/",
+    });
+  };
+
   const getCurrentPage = () => {
     const hash = window.location.hash;
 
@@ -95,6 +108,49 @@ function App() {
       window.removeEventListener("hashchange", handleHashChange);
     };
   }, []);
+
+  if (auth.isLoading) {
+    return <div className="auth-loading">Loading TechBook...</div>;
+  }
+
+  if (auth.error) {
+    return (
+      <div className="auth-loading">
+        <h2>Authentication error</h2>
+        <p>{auth.error.message}</p>
+        <button onClick={handleSignIn}>Try signing in again</button>
+      </div>
+    );
+  }
+
+  if (!auth.isAuthenticated) {
+    return (
+      <main className="auth-screen">
+        <section className="auth-card">
+          <div className="auth-brand-icon">T</div>
+          <p className="eyebrow">YOUR PERSONAL LEARNING SPACE</p>
+          <h1>
+            Welcome to <span>TechBook.</span>
+          </h1>
+          <p>
+            Understand more, study smarter, and make every
+            learning session count.
+          </p>
+
+          <button
+            className="primary-button"
+            onClick={handleSignIn}
+          >
+            Sign in / Create account →
+          </button>
+
+          <small>
+            Secure sign-in powered by Amazon Cognito.
+          </small>
+        </section>
+      </main>
+    );
+  }
 
   if (currentPage === "note-craft") {
     return <NoteCraft />;
@@ -129,7 +185,7 @@ function App() {
   }
 
   if (currentPage === "study-planner") {
-  return <StudyPlanner />;
+    return <StudyPlanner />;
   }
 
   return (
@@ -181,12 +237,27 @@ function App() {
         </nav>
 
         <div className="sidebar-bottom">
-          <div className="profile-avatar">S</div>
+          <div className="profile-avatar">
+            {(auth.user?.profile?.email || "S")
+              .charAt(0)
+              .toUpperCase()}
+          </div>
 
           <div>
-            <strong>Student</strong>
-            <p>Your learning space</p>
+            <strong>
+              {auth.user?.profile?.email || "Student"}
+            </strong>
+            <p>Signed in to TechBook</p>
           </div>
+
+          <button
+            type="button"
+            onClick={handleSignOut}
+            title="Sign out"
+            aria-label="Sign out"
+          >
+            ↪
+          </button>
         </div>
       </aside>
 
