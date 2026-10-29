@@ -31,3 +31,16 @@ dist-ssr
 # Dependencies in nested project folders
 **/node_modules/
 **/dist/
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+**/dist/
