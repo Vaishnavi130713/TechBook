@@ -12,6 +12,14 @@ const cognitoAuthConfig = {
   redirect_uri: "http://localhost:5175/",
   response_type: "code",
   scope: "openid email",
+
+  onSigninCallback: () => {
+    window.history.replaceState(
+      {},
+      document.title,
+      window.location.pathname + window.location.hash
+    );
+  },
 };
 
 createRoot(document.getElementById("root")).render(
@@ -19,5 +27,5 @@ createRoot(document.getElementById("root")).render(
     <AuthProvider {...cognitoAuthConfig}>
       <App />
     </AuthProvider>
-  </StrictMode>,
+  </StrictMode>
 );
