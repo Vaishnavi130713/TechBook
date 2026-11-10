@@ -1,9 +1,11 @@
-
 import { useState } from "react";
+import { useAuth } from "react-oidc-context";
 import {
   recordTopic,
   recordActivity,
 } from "../utils/learningHistory";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 const outputOptions = [
   {
@@ -50,16 +52,248 @@ const outputOptions = [
   },
 ];
 
+// Converts AI-generated Markdown into formatted HTML.
+function markdownToHtml(markdown) {
+  const escapeHtml = (value) =>
+    value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+  const formatInline = (value) =>
+    escapeHtml(value)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+
+  const lines = String(markdown || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n");
+
+  const output = [];
+  let paragraph = [];
+  let list = null;
+  let nextOrderedNumber = 1;
+  let codeBlock = false;
+  let codeLines = [];
+  let index = 0;
+
+  const flushParagraph = () => {
+    if (paragraph.length) {
+      output.push(`<p>${formatInline(paragraph.join(" "))}</p>`);
+      paragraph = [];
+    }
+  };
+
+  const closeList = () => {
+    if (list) {
+      output.push(`</${list}>`);
+      list = null;
+    }
+  };
+
+  while (index < lines.length) {
+    const line = lines[index];
+    const trimmed = line.trim();
+
+    // Code blocks
+    if (trimmed.startsWith("```")) {
+      flushParagraph();
+      closeList();
+
+      if (codeBlock) {
+        output.push(
+          `<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`
+        );
+        codeLines = [];
+        codeBlock = false;
+      } else {
+        codeBlock = true;
+      }
+
+      index++;
+      continue;
+    }
+
+    if (codeBlock) {
+      codeLines.push(line);
+      index++;
+      continue;
+    }
+
+    // Tables
+    if (
+      trimmed.includes("|") &&
+      index + 1 < lines.length &&
+      /^\s*\|?\s*:?-{3,}/.test(lines[index + 1])
+    ) {
+      flushParagraph();
+      closeList();
+
+      const splitCells = (row) =>
+        row
+          .trim()
+          .replace(/^\|/, "")
+          .replace(/\|$/, "")
+          .split("|")
+          .map((cell) => cell.trim());
+
+      const headers = splitCells(trimmed);
+
+      output.push(
+        '<div class="ll-table-wrap"><table><thead><tr>'
+      );
+
+      output.push(
+        headers
+          .map((cell) => `<th>${formatInline(cell)}</th>`)
+          .join("")
+      );
+
+      output.push("</tr></thead><tbody>");
+
+      index += 2;
+
+      while (
+        index < lines.length &&
+        lines[index].trim().includes("|")
+      ) {
+        const cells = splitCells(lines[index]);
+
+        output.push(
+          "<tr>" +
+            cells
+              .map((cell) => `<td>${formatInline(cell)}</td>`)
+              .join("") +
+            "</tr>"
+        );
+
+        index++;
+      }
+
+      output.push("</tbody></table></div>");
+      continue;
+    }
+
+    // Headings
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+
+    if (heading) {
+      flushParagraph();
+      closeList();
+      nextOrderedNumber = 1;
+
+      const level = heading[1].length;
+
+      output.push(
+        `<h${level}>${formatInline(heading[2])}</h${level}>`
+      );
+
+      index++;
+      continue;
+    }
+
+    // Horizontal separators
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      flushParagraph();
+      closeList();
+      output.push("<hr />");
+      index++;
+      continue;
+    }
+
+    // Lists
+    const unordered = trimmed.match(/^[-*+]\s+(.+)$/);
+    const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/);
+    
+    if (unordered || ordered) {
+      flushParagraph();
+      
+      const nextList = unordered ? "ul" : "ol";
+      
+      if (list !== nextList) {
+        closeList();
+        
+        if (nextList === "ol") {
+          const startAttribute =
+            nextOrderedNumber > 1
+              ? ` start="${nextOrderedNumber}"`
+              : "";
+
+          output.push(`<ol${startAttribute}>`);
+        } else {
+          output.push("<ul>");
+      }
+
+      list = nextList;
+    }
+    
+    output.push(
+      `<li>${formatInline((unordered || ordered)[1])}</li>`
+    );
+    
+    if (ordered) {
+      nextOrderedNumber++;
+    }
+    
+    index++;
+    continue;
+ }
+
+    // Empty lines
+    if (!trimmed) {
+      flushParagraph();
+      index++;
+      continue;
+    }
+
+    closeList();
+    paragraph.push(trimmed);
+    index++;
+  }
+
+  if (codeBlock) {
+    output.push(
+      `<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`
+    );
+  }
+
+  flushParagraph();
+  closeList();
+
+  return output.join("\n");
+}
+
+function MarkdownContent({ content }) {
+  const formattedContent = markdownToHtml(content);
+
+  return (
+    <div
+      className="ll-markdown"
+      dangerouslySetInnerHTML={{ __html: formattedContent }}
+    />
+  );
+}
+
 function LectureLens() {
   const [videoUrl, setVideoUrl] = useState("");
   const [error, setError] = useState("");
   const [lecture, setLecture] = useState(null);
   const [selectedOutput, setSelectedOutput] = useState("summary");
 
-  function handleSubmit(event) {
+  const auth = useAuth();
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [generatedContent, setGeneratedContent] = useState("");
+
+  async function handleSubmit(event) {
     event.preventDefault();
+
     setError("");
     setLecture(null);
+    setGeneratedContent("");
 
     const trimmedUrl = videoUrl.trim();
 
@@ -68,13 +302,26 @@ function LectureLens() {
       return;
     }
 
+    if (!API_BASE_URL) {
+      setError("API URL is missing. Check your .env file.");
+      return;
+    }
+
+    const accessToken = auth.user?.access_token;
+
+    if (!accessToken) {
+      setError("Your session has expired. Please sign in again.");
+      return;
+    }
+
+    let videoId = "";
+
     try {
       const url = new URL(trimmedUrl);
+
       const hostname = url.hostname
         .toLowerCase()
         .replace(/^www\./, "");
-
-      let videoId = "";
 
       if (hostname === "youtu.be") {
         videoId = url.pathname.split("/").filter(Boolean)[0] || "";
@@ -100,12 +347,83 @@ function LectureLens() {
         );
         return;
       }
+    } catch {
+      setError("Please enter a valid YouTube URL.");
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      // STEP 1: FETCH YOUTUBE TRANSCRIPT
+
+      const transcriptResponse = await fetch(
+        `${API_BASE_URL}/lecture/transcript`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            youtubeUrl: trimmedUrl,
+            language: "en",
+          }),
+        }
+      );
+
+      const transcriptResult = await transcriptResponse.json();
+
+      if (!transcriptResponse.ok || !transcriptResult.success) {
+        throw new Error(
+          transcriptResult.error ||
+            "Unable to extract the lecture transcript."
+        );
+      }
+
+      const transcriptData = transcriptResult.data;
+
+      const lectureTitle =
+        transcriptData.title || `YouTube Lecture (${videoId})`;
+
+      // STEP 2: GENERATE CONTENT USING AMAZON NOVA
+
+      const aiResponse = await fetch(
+        `${API_BASE_URL}/ai/generate`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            outputType: selectedOutput,
+            title: lectureTitle,
+            transcript: transcriptData.transcript,
+            segments: transcriptData.segments || [],
+          }),
+        }
+      );
+
+      const aiResult = await aiResponse.json();
+
+      if (!aiResponse.ok || !aiResult.success) {
+        throw new Error(
+          aiResult.error || "AI content generation failed."
+        );
+      }
+
+      const generated = aiResult.data.content;
+
+      if (!generated) {
+        throw new Error("The AI returned empty study material.");
+      }
+
+      // STEP 3: SAVE LEARNING ACTIVITY
 
       const selectedOption = outputOptions.find(
         (option) => option.id === selectedOutput
       );
-
-      const lectureTitle = `YouTube Lecture (${videoId})`;
 
       recordTopic({
         title: lectureTitle,
@@ -116,26 +434,39 @@ function LectureLens() {
       });
 
       recordActivity({
-        title: `${
-          selectedOption?.title || "Lecture Workspace"
-        } — ${lectureTitle}`,
-        type: "Lecture workspace prepared",
+        title: `${selectedOption?.title || "Lecture Workspace"} — ${lectureTitle}`,
+        type: "AI study material generated",
         subject: "General",
         feature: "LectureLens",
         minutes: 0,
         icon: "▶",
-        details: `Selected output: ${
+        details: `Generated: ${
           selectedOption?.title || "Smart Lecture Summary"
         }`,
       });
 
+      // STEP 4: DISPLAY THE RESULT
+
+      setGeneratedContent(generated);
+
       setLecture({
         videoId,
+        title: lectureTitle,
         url: `https://www.youtube.com/watch?v=${videoId}`,
         output: selectedOutput,
+        transcript: transcriptData.transcript,
+        segments: transcriptData.segments || [],
+        language: transcriptData.language || "en",
       });
-    } catch {
-      setError("Please enter a valid YouTube URL.");
+    } catch (error) {
+      console.error("LectureLens generation error:", error);
+
+      setError(
+        error.message ||
+          "Something went wrong while preparing your study material."
+      );
+    } finally {
+      setIsLoading(false);
     }
   }
 
@@ -147,7 +478,7 @@ function LectureLens() {
     <main className="ll-page">
       <header className="ll-topbar">
         <button
-          className="ll-back"
+          className="ll-back-button"
           type="button"
           onClick={goBack}
         >
@@ -235,8 +566,13 @@ function LectureLens() {
           <button
             className="ll-submit"
             type="submit"
+            disabled={isLoading}
           >
-            Prepare my lecture <span>✦</span>
+            {isLoading
+              ? "Generating your study material..."
+              : "Prepare my lecture"}
+
+            {!isLoading && <span>✦</span>}
           </button>
 
           <p className="ll-footnote">
@@ -356,10 +692,29 @@ function LectureLens() {
           </div>
 
           <p className="ll-status">
-            Your link is valid and your output preference is saved
-            for this session. Transcript extraction and AI content
-            generation have not been connected yet.
+            Your lecture transcript is ready! Your study material
+            has been generated successfully.
           </p>
+
+          <div className="ll-generated-content">
+            <h3>
+              {outputOptions.find(
+                (option) => option.id === lecture.output
+              )?.title}
+            </h3>
+
+            <MarkdownContent content={generatedContent} />
+          </div>
+
+          <details className="ll-transcript">
+            <summary>View extracted transcript</summary>
+
+            <p>
+              <strong>{lecture.title}</strong>
+            </p>
+
+            <p>{lecture.transcript}</p>
+          </details>
 
           <a
             className="ll-open-link"
