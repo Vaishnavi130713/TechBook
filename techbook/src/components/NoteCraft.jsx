@@ -1,8 +1,14 @@
 import { useState } from "react";
+import { useAuth } from "react-oidc-context";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
 import {
   recordTopic,
   recordActivity,
 } from "../utils/learningHistory";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 const contentTypes = [
   "Revision Notes",
@@ -27,7 +33,32 @@ const formats = [
   { type: "MCQs", icon: "✓", title: "Practice quiz", detail: "Test your knowledge", color: "mint" },
 ];
 
+function parseFlashcards(content) {
+  const sections = content
+    .split(/(?=\*\*Card\s+\d+\*\*)/i)
+    .filter((section) => /\*\*Question:\*\*/i.test(section));
+
+  return sections
+    .map((section) => {
+      const questionMatch = section.match(
+        /\*\*Question:\*\*\s*([\s\S]*?)(?=\*\*Answer:\*\*|$)/i
+      );
+
+      const answerMatch = section.match(
+        /\*\*Answer:\*\*\s*([\s\S]*?)$/i
+      );
+
+      return {
+        question: questionMatch?.[1]?.trim() || "",
+        answer: answerMatch?.[1]?.trim() || "",
+      };
+    })
+    .filter((card) => card.question && card.answer);
+}
+
 function NoteCraft() {
+  const auth = useAuth();
+
   const [topic, setTopic] = useState("");
   const [subject, setSubject] = useState("");
   const [contentType, setContentType] = useState("Revision Notes");
@@ -35,54 +66,115 @@ function NoteCraft() {
   const [goal, setGoal] = useState("exam");
   const [result, setResult] = useState("");
   const [error, setError] = useState("");
+  const [activeCardIndex, setActiveCardIndex] = useState(0);
+  const [isCardFlipped, setIsCardFlipped] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   
-  function generateContent(event) {
-      event.preventDefault();
-      setError("");
-      setResult("");
-      
-      const cleanTopic = topic.trim();
-      const cleanSubject = subject.trim() || "General";
-      
-      if (!cleanTopic) {
+ 
+async function generateContent(event) {
+  event.preventDefault();
+
+  setError("");
+  setResult("");
+
+  const cleanTopic = topic.trim();
+  const cleanSubject = subject.trim() || "General";
+
+  if (!cleanTopic) {
     setError("Add a topic first, and we'll prepare your study workspace.");
+    return;
+  }
+
+  if (!API_BASE_URL) {
+    setError("API configuration is missing. Please check your environment settings.");
+    return;
+  }
+
+  const accessToken = auth.user?.access_token;
+
+  if (!accessToken) {
+    setError("Your session has expired. Please sign in again.");
     return;
   }
 
   const selectedGoal = goals.find((item) => item.id === goal);
 
-  // Record that the student started studying this topic.
-  recordTopic({
-    title: cleanTopic,
-    subject: cleanSubject,
-    feature: "Note Craft",
-    progress: 0,
-    status: "in-progress",
-  });
+  setIsLoading(true);
 
-  // Record the study-material creation attempt.
-  recordActivity({
-    title: `${contentType} — ${cleanTopic}`,
-    type: "Study material requested",
-    subject: cleanSubject,
-    feature: "Note Craft",
-    minutes: 0,
-    icon: "📝",
-    details: `Level: ${level}; Goal: ${
-      selectedGoal?.title || "General learning"
-    }`,
-  });
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/ai/note-craft`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          topic: cleanTopic,
+          subject: cleanSubject,
+          contentType,
+          level,
+          goal,
+        }),
+      }
+    );
 
-  setResult(
-    `Your ${contentType.toLowerCase()}\n\n` +
-    `Topic: ${cleanTopic}\n` +
-    `Subject: ${cleanSubject}\n` +
-    `Learning level: ${level}\n` +
-    `Study goal: ${selectedGoal?.title || "General learning"}\n\n` +
-    `Your topic has been added to My Learning. ` +
-    `AI-generated study material will be available when the AI service is connected.`
-  );
+    const responseData = await response.json();
+
+    if (!response.ok || !responseData.success) {
+      throw new Error(
+        responseData.error || "Unable to generate study material. Please try again."
+      );
+    }
+
+    const generatedContent = responseData.data?.content;
+
+    if (
+      typeof generatedContent !== "string" ||
+      !generatedContent.trim()
+    ) {
+      throw new Error("The AI returned empty study material. Please try again.");
+    }
+
+    // Display the actual AI-generated study material.
+    setResult(generatedContent);
+    setActiveCardIndex(0);
+    setIsCardFlipped(false);
+
+    // Record the topic after successful generation.
+    recordTopic({
+      title: cleanTopic,
+      subject: cleanSubject,
+      feature: "Note Craft",
+      progress: 0,
+      status: "in-progress",
+    });
+
+    // Record the successful study-material generation.
+    recordActivity({
+      title: `${contentType} — ${cleanTopic}`,
+      type: "Study material generated",
+      subject: cleanSubject,
+      feature: "Note Craft",
+      minutes: 0,
+      icon: "📝",
+      details: `Level: ${level}; Goal: ${
+        selectedGoal?.title || "General learning"
+      }`,
+    });
+
+  } catch (error) {
+    console.error("Note Craft generation error:", error);
+
+    setError(
+      error.message || "Something went wrong. Please try again."
+    );
+  } finally {
+    setIsLoading(false);
+  }
 }
+
 
 
   function goBack() {
@@ -206,8 +298,16 @@ function NoteCraft() {
 
           {error && <p className="nc-error" role="alert">{error}</p>}
 
-          <button className="nc-submit" type="submit">
-            Create study material <span>✦</span>
+          <button
+           className="nc-submit"
+           type="submit"
+           disabled={isLoading}
+          >
+            {isLoading ? (
+              <>Generating your study material...</>
+            ) : (
+             <>Create study material <span>✦</span></>
+            )}
           </button>
           <p className="nc-form-footnote">✧ Your study session starts with one topic.</p>
         </form>
@@ -278,15 +378,113 @@ function NoteCraft() {
       </section>
 
       {result && (
-        <section className="nc-result" aria-live="polite">
-          <div>
-            <span className="nc-eyebrow">YOUR STUDY WORKSPACE</span>
-            <h2>You're ready to learn ✨</h2>
+  <section className="nc-result" aria-live="polite">
+    <div>
+      <span className="nc-eyebrow">YOUR STUDY WORKSPACE</span>
+      <h2>Your study material is ready ✨</h2>
+    </div>
+
+    {contentType === "Flashcards" ? (
+      (() => {
+        const cards = parseFlashcards(result);
+        const currentCard = cards[activeCardIndex];
+
+        if (!cards.length) {
+          return (
+            <div className="nc-markdown">
+              <p>Flashcards could not be separated into individual cards.</p>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
+                {result}
+              </ReactMarkdown>
+            </div>
+          );
+        }
+
+        return (
+          <div className="nc-flashcard-workspace">
+
+            <div className="nc-flashcard-toolbar">
+              <span>✦ INTERACTIVE FLASHCARDS</span>
+              <span>
+                Card {activeCardIndex + 1} of {cards.length}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              className={`nc-flashcard ${isCardFlipped ? "flipped" : ""}`}
+              onClick={() => setIsCardFlipped((previous) => !previous)}
+              aria-label={
+                isCardFlipped
+                  ? "Show question"
+                  : "Reveal answer"
+              }
+            >
+              <span className="nc-flashcard-label">
+                {isCardFlipped ? "✦ ANSWER" : "✦ QUESTION"}
+              </span>
+
+              <div className="nc-flashcard-content">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  skipHtml
+                >
+                  {isCardFlipped
+                    ? currentCard.answer
+                    : currentCard.question}
+                </ReactMarkdown>
+              </div>
+
+              <span className="nc-flashcard-hint">
+                ↻ Tap to {isCardFlipped ? "see question" : "reveal answer"}
+              </span>
+            </button>
+
+            <div className="nc-flashcard-navigation">
+
+              <button
+                type="button"
+                disabled={activeCardIndex === 0}
+                onClick={() => {
+                  setActiveCardIndex((index) => index - 1);
+                  setIsCardFlipped(false);
+                }}
+              >
+                ← Previous
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsCardFlipped((previous) => !previous)}
+              >
+                {isCardFlipped ? "Show Question" : "Reveal Answer"}
+              </button>
+
+              <button
+                type="button"
+                disabled={activeCardIndex === cards.length - 1}
+                onClick={() => {
+                  setActiveCardIndex((index) => index + 1);
+                  setIsCardFlipped(false);
+                }}
+              >
+                Next →
+              </button>
+
+            </div>
+
           </div>
-          <pre>{result}</pre>
-          <p>Preview only — AI generation isn't connected yet.</p>
-        </section>
-      )}
+        );
+      })()
+    ) : (
+      <div className="nc-markdown">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
+          {result}
+        </ReactMarkdown>
+      </div>
+    )}
+  </section>
+)}
     </main>
   );
 }
